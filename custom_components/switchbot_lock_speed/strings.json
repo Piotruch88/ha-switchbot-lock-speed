@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SwitchBot Lock Speed",
+        "description": "Choose a SwitchBot Lock Ultra already set up in the SwitchBot integration (its address and encryption key are reused), or enter the details manually. A test read is done before saving.",
+        "data": {
+          "source_entry": "Lock"
+        }
+      },
+      "manual": {
+        "title": "Lock details",
+        "description": "Only the SwitchBot Lock Ultra is supported. The key ID and encryption key are the same as for the official SwitchBot integration.",
+        "data": {
+          "address": "Bluetooth address",
+          "key_id": "Key ID (2 hex characters)",
+          "encryption_key": "Encryption key (32 hex characters)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Test read failed ({error}). Make sure the lock is in range and the SwitchBot app is closed, then try again.",
+      "invalid_address": "Address must look like AA:BB:CC:DD:EE:FF.",
+      "invalid_key_id": "Key ID must be 2 hex characters.",
+      "invalid_key": "Encryption key must be 32 hex characters."
+    },
+    "abort": {
+      "already_configured": "This lock is already configured."
+    }
+  },
+  "entity": {
+    "select": {
+      "speed": {
+        "name": "Motor speed",
+        "state": {
+          "max": "Max Mode (Default)",
+          "standard": "Standard",
+          "low": "Low"
+        }
+      }
+    }
+  }
+}

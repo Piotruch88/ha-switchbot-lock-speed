@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements_test.txt
+          # Requirements of HA's bluetooth/usb components, matched to the installed HA version
+          pip install $(python - <<'EOF'
+          import json, pathlib, homeassistant
+          base = pathlib.Path(homeassistant.__file__).parent / "components"
+          reqs = []
+          for comp in ("bluetooth", "usb"):
+              reqs += json.loads((base / comp / "manifest.json").read_text())["requirements"]
+          print(" ".join(reqs))
+          EOF
+          )
+      - run: pytest

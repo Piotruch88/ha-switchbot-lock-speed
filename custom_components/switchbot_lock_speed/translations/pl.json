@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SwitchBot Lock Speed",
+        "description": "Wybierz zamek SwitchBot Lock Ultra skonfigurowany w integracji SwitchBot (jego adres i klucz szyfrowania zostaną użyte) albo wpisz dane ręcznie. Przed zapisaniem wykonywany jest odczyt testowy.",
+        "data": {
+          "source_entry": "Zamek"
+        }
+      },
+      "manual": {
+        "title": "Dane zamka",
+        "description": "Obsługiwany jest tylko SwitchBot Lock Ultra. Key ID i klucz szyfrowania są takie same jak w oficjalnej integracji SwitchBot.",
+        "data": {
+          "address": "Adres Bluetooth",
+          "key_id": "Key ID (2 znaki hex)",
+          "encryption_key": "Klucz szyfrowania (32 znaki hex)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Odczyt testowy nie powiódł się ({error}). Sprawdź, czy zamek jest w zasięgu i aplikacja SwitchBot jest zamknięta, i spróbuj ponownie.",
+      "invalid_address": "Adres musi mieć postać AA:BB:CC:DD:EE:FF.",
+      "invalid_key_id": "Key ID to 2 znaki szesnastkowe.",
+      "invalid_key": "Klucz szyfrowania to 32 znaki szesnastkowe."
+    },
+    "abort": {
+      "already_configured": "Ten zamek jest już skonfigurowany."
+    }
+  },
+  "entity": {
+    "select": {
+      "speed": {
+        "name": "Prędkość silnika",
+        "state": {
+          "max": "Max Mode (Default)",
+          "standard": "Standard",
+          "low": "Low"
+        }
+      }
+    }
+  }
+}

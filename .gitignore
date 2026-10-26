@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.zip
+# never commit lock keys or captures
+*secrets*.json
+lock.json
+*.log
+btsnoop*
