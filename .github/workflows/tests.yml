@@ -8,8 +8,8 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install test dependencies
@@ -25,4 +25,12 @@ jobs:
           print(" ".join(reqs))
           EOF
           )
-      - run: pytest
+      - name: Run pytest
+        run: |
+          set -o pipefail
+          pytest -ra 2>&1 | tee pytest.log
+      - name: Publish pytest output as annotation
+        if: failure()
+        run: |
+          # Annotations are readable without signing in, unlike job logs.
+          tail -n 80 pytest.log | python -c "import sys; t = sys.stdin.read().replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'); print('::error title=pytest output::' + t)"

@@ -28,7 +28,7 @@ The official SwitchBot integration locks and unlocks the door but does not expos
 
 ### HACS (custom repository)
 
-1. HACS → ⋮ → **Custom repositories** → add `https://github.com/GITHUB_USER/ha-switchbot-lock-speed`, category **Integration**.
+1. HACS → ⋮ → **Custom repositories** → add `https://github.com/Piotruch88/ha-switchbot-lock-speed`, category **Integration**.
 2. Install **SwitchBot Lock Speed** and restart Home Assistant.
 
 ### Manual
