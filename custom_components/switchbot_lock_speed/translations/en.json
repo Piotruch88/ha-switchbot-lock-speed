@@ -38,6 +38,11 @@
           "low": "Low"
         }
       }
+    },
+    "switch": {
+      "sound": {
+        "name": "Sound"
+      }
     }
   }
 }

@@ -19,6 +19,7 @@ from test_protocol import FakeLock
 
 ADDRESS = "AA:BB:CC:DD:EE:FF"
 ENTITY = "select.switchbot_lock_ee_ff_motor_speed"
+SOUND = "switch.switchbot_lock_ee_ff_sound"
 
 
 class FakeClient(FakeLock):
@@ -85,7 +86,7 @@ async def setup(hass, key):
     entry = MockConfigEntry(domain=DOMAIN, data=data(key), unique_id=ADDRESS, title="SwitchBot Lock EE:FF")
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     return entry
 
 
@@ -98,7 +99,7 @@ async def test_flow_reuses_switchbot_entry(hass, key, lock, ble):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Drzwi"
     assert result["data"] == data(key)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     # test read in the flow + the entity's initial read after setup; never a write
     assert lock.plain == ["0f4f0401", "0f4f0401"]
     assert lock.disconnects == 2
@@ -216,7 +217,7 @@ async def test_uncertain_write_is_not_retried(hass, key, lock, ble):
     with pytest.raises(HomeAssistantError, match="not confirmed"):
         await hass.services.async_call("select", "select_option", {"entity_id": ENTITY, "option": "low"}, blocking=True)
     assert sum(p.startswith("0f4e") for p in lock.plain) == 1
-    assert "expected ca00" in hass.states.get(ENTITY).attributes["last_error"]
+    assert "expected <flags>00" in hass.states.get(ENTITY).attributes["last_error"]
 
 
 async def test_lock_out_of_range(hass, key, lock, ble):
@@ -228,3 +229,45 @@ async def test_lock_out_of_range(hass, key, lock, ble):
     with pytest.raises(HomeAssistantError, match="Speed not changed"):
         await hass.services.async_call("select", "select_option", {"entity_id": ENTITY, "option": "low"}, blocking=True)
     assert lock.writes == []
+
+
+async def test_sound_switch(hass, key, lock, ble):
+    await setup(hass, key)
+    lock.mode = 0x01  # changed elsewhere; the sound write must not change it back
+    assert hass.states.get(SOUND).state == "on"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": SOUND}, blocking=True)
+    assert hass.states.get(SOUND).state == "off"
+    assert lock.plain[-2:] == ["0f4e0401004000ff", "0f4f0401"]
+    assert lock.mode == 0x01
+    assert hass.states.get(ENTITY).state == "standard", "speed select refreshed from the same read"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": SOUND}, blocking=True)
+    assert hass.states.get(SOUND).state == "on"
+    assert lock.plain[-2] == "0f4e0401004040ff"
+    assert sum(p.startswith("0f4e") for p in lock.plain) == 2
+
+
+async def test_speed_change_with_sound_off(hass, key, lock, ble):
+    """Regression for v0.2.0: with sound off the lock answers 8a00 and the change is still confirmed."""
+    lock.flags = 0x8A
+    await setup(hass, key)
+    assert hass.states.get(SOUND).state == "off"
+    await hass.services.async_call("select", "select_option", {"entity_id": ENTITY, "option": "low"}, blocking=True)
+    assert hass.states.get(ENTITY).state == "low"
+    assert hass.states.get(SOUND).state == "off"
+
+
+async def test_sound_not_applied_raises(hass, key, lock, ble):
+    await setup(hass, key)
+    lock.scenario = "flags_ignored"
+    with pytest.raises(HomeAssistantError, match="Sound command was sent but not confirmed"):
+        await hass.services.async_call("switch", "turn_off", {"entity_id": SOUND}, blocking=True)
+    assert sum(p.startswith("0f4e") for p in lock.plain) == 1
+
+
+async def test_refresh_updates_both_entities(hass, key, lock, ble):
+    assert await async_setup_component(hass, "homeassistant", {})
+    await setup(hass, key)
+    lock.flags, lock.mode = 0x8A, 0x02  # changed in the SwitchBot app
+    await hass.services.async_call("homeassistant", "update_entity", {"entity_id": SOUND}, blocking=True)
+    assert hass.states.get(SOUND).state == "off"
+    assert hass.states.get(ENTITY).state == "low"

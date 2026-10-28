@@ -1,20 +1,23 @@
-"""SwitchBot Lock Ultra motor speed (Max / Standard / Low) over local BLE."""
+"""SwitchBot Lock Ultra motor speed and sound over local BLE."""
 from __future__ import annotations
-
-import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-PLATFORMS = [Platform.SELECT]
+from .const import DOMAIN
+from .coordinator import LockSettingsCoordinator
 
-type LockSpeedConfigEntry = ConfigEntry[asyncio.Lock]
+PLATFORMS = [Platform.SELECT, Platform.SWITCH]
+
+type LockSpeedConfigEntry = ConfigEntry[LockSettingsCoordinator]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: LockSpeedConfigEntry) -> bool:
-    entry.runtime_data = asyncio.Lock()  # one BLE session at a time per lock
+    entry.runtime_data = coordinator = LockSettingsCoordinator(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Initial read in the background: a busy lock must not block or fail the setup.
+    entry.async_create_background_task(hass, coordinator.async_refresh(), f"{DOMAIN} initial read")
     return True
 
 

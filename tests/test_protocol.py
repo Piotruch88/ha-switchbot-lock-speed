@@ -3,6 +3,7 @@ import asyncio
 import importlib.util
 import os
 import pathlib
+import sys
 
 import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -10,6 +11,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 _PATH = pathlib.Path(__file__).parents[1] / "custom_components" / "switchbot_lock_speed" / "protocol.py"
 _spec = importlib.util.spec_from_file_location("lock_speed_protocol", _PATH)
 protocol = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = protocol  # dataclasses look the module up while decorating
 _spec.loader.exec_module(protocol)
 
 IV = bytes.fromhex("00112233445566778899aabbccddeeff")
@@ -21,10 +23,10 @@ def ctr(key, data):
 
 
 class FakeLock:
-    """Answers like the recorded lock; `mode` is what 0f4f0401 reports."""
+    """Answers like the recorded lock: settings register 0401 = `flags` (0xca: sound on) + `mode`."""
 
     def __init__(self, key, scenario="ok"):
-        self.key, self.scenario, self.mode = key, scenario, 0x00
+        self.key, self.scenario, self.mode, self.flags = key, scenario, 0x00, 0xCA
         self.callback, self.writes, self.plain = None, [], []
 
     async def start_notify(self, char, callback):
@@ -45,12 +47,16 @@ class FakeLock:
             loop.call_soon(self.callback, None, bytearray(b"\x07"))
             return
         if plain == bytes.fromhex("0f4f0401"):
-            payload = bytes([0xCA, 0x00, self.mode, 0x00, 0xC0])
-        elif plain[:7] == bytes.fromhex("0f4e0401000000") and len(plain) == 8:
+            payload = bytes([self.flags, 0x00, self.mode, 0x00, 0xC0])
+        elif plain[:4] == bytes.fromhex("0f4e0401") and len(plain) == 8:
             if self.scenario == "write_silent":
                 return
-            self.mode = plain[7]
-            payload = bytes.fromhex("ca01" if self.scenario == "write_bad" else "ca00")
+            _, mask, value, speed = plain[4:]
+            if self.scenario != "flags_ignored":
+                self.flags = (self.flags & ~mask & 0xFF) | (value & mask)
+            if speed != 0xFF:
+                self.mode = speed
+            payload = bytes([self.flags, 0x01 if self.scenario == "write_bad" else 0x00])
         else:
             return  # unknown command, e.g. wrong key: the lock stays silent
         # unrelated push first: must be ignored by the session
@@ -136,7 +142,38 @@ async def test_auth_rejected(key):
         await session.read_mode()
 
 
-def test_parse_setting_length():
-    assert protocol.parse_setting(bytes.fromhex("ca000200c0")) == 2
+def test_parse_settings():
+    settings = protocol.parse_settings(bytes.fromhex("8a000200c0"))
+    assert (settings.flags, settings.speed, settings.sound, settings.raw) == (0x8A, 2, False, "8a000200c0")
+    assert protocol.parse_settings(bytes.fromhex("ca000000c0")).sound is True
     with pytest.raises(protocol.LockSpeedError):
-        protocol.parse_setting(bytes.fromhex("ca0000"))
+        protocol.parse_settings(bytes.fromhex("ca0000"))
+
+
+@pytest.mark.parametrize(("on", "command", "flags"), [(False, "0f4e0401004000ff", 0x8A), (True, "0f4e0401004040ff", 0xCA)])
+async def test_sound_commands_match_capture(key, on, command, flags):
+    lock = FakeLock(key)
+    lock.flags = 0x8A if on else 0xCA
+    lock.mode = 0x01
+    session = await started(lock, key)
+    assert await session.write_sound(on) == flags
+    assert lock.plain == [command]
+    assert lock.mode == 0x01, "sound write must not touch the speed"
+
+
+async def test_speed_write_accepted_with_sound_off(key):
+    """Regression: with sound off the lock answers 8a00, not ca00."""
+    lock = FakeLock(key)
+    lock.flags = 0x8A
+    session = await started(lock, key)
+    assert await session.write_mode(2) == 0x8A
+    assert lock.flags == 0x8A, "speed write must not touch the sound"
+    assert (await session.read_settings()).speed == 2
+
+
+async def test_sound_not_applied_is_uncertain(key):
+    lock = FakeLock(key, "flags_ignored")
+    session = await started(lock, key)
+    with pytest.raises(protocol.WriteUncertainError, match="flags ca"):
+        await session.write_sound(False)
+    assert sum(p.startswith("0f4e") for p in lock.plain) == 1
