@@ -2,11 +2,11 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 
-Adds a **Motor speed** select entity (Max Mode / Standard / Low) to a **SwitchBot Lock Ultra**, controlled locally over Bluetooth. No cloud, no SwitchBot Hub.
+Adds a **Motor speed** select (Max Mode / Standard / Low) and a **Sound** switch to a **SwitchBot Lock Ultra**, controlled locally over Bluetooth. No cloud, no SwitchBot Hub.
 
-The official SwitchBot integration locks and unlocks the door but does not expose the motor speed setting. This integration adds only that setting and leaves everything else to the official integration.
+The official SwitchBot integration locks and unlocks the door but does not expose the motor speed or sound settings. This integration adds only those settings and leaves everything else to the official integration.
 
-> **Unofficial project.** It is not affiliated with or endorsed by SwitchBot / Wonderlabs. It writes a setting to your lock using commands captured from the official app. Use at your own risk.
+> **Unofficial project.** It is not affiliated with or endorsed by SwitchBot / Wonderlabs. It writes settings to your lock using commands captured from the official app. Use at your own risk.
 
 [Polski opis niżej](#polski)
 
@@ -18,6 +18,7 @@ The official SwitchBot integration locks and unlocks the door but does not expos
 | Tested | One Lock Ultra, Home Assistant 2026.10 (local adapter), test suite on Home Assistant 2026.2 |
 | `Standard` (0x01) | Confirmed on the lock and in the SwitchBot app |
 | `Max Mode` (0x00), `Low` (0x02) | Inferred from app captures. Please open an issue if the app shows a different mode |
+| Sound on/off | Captured from the app (flag `0x40` of the settings register) |
 
 ## Requirements
 
@@ -54,7 +55,15 @@ data:
   option: low
 ```
 
-- The current mode is read at startup and after every change. The lock is **not polled** periodically, to save battery. To refresh after changing the mode in the SwitchBot app, use `homeassistant.update_entity`.
+The switch `switch.<lock>_sound` turns the lock's sounds on and off:
+
+```yaml
+action: switch.turn_off
+target:
+  entity_id: switch.front_door_sound
+```
+
+- Both entities come from one read of the lock's settings register, at startup and after every change. The lock is **not polled** periodically, to save battery. To refresh after changing a setting in the SwitchBot app, use `homeassistant.update_entity` on either entity.
 - Attributes: `raw_setting` (raw 5-byte read), `last_read`, `last_error`.
 
 Example: set the speed before unlocking. Run the steps one after the other, because the lock accepts one Bluetooth connection at a time:
@@ -77,9 +86,9 @@ sequence:
 
 ## Safety behaviour
 
-- The speed command is sent **once** per change and is **never retried**. Only connecting is retried, and nothing has been sent at that point.
-- `Speed command was sent but not confirmed`: the command may have reached the lock. Check the SwitchBot app before trying again.
-- `Speed not changed`: nothing was written.
+- A speed or sound command is sent **once** per change and is **never retried**. Only connecting is retried, and nothing has been sent at that point.
+- `Speed/Sound command was sent but not confirmed`: the command may have reached the lock. Check the SwitchBot app before trying again.
+- `Speed/Sound not changed`: nothing was written.
 - The integration sends no lock, unlock, calibration, key or firmware commands.
 
 ## Troubleshooting
@@ -96,10 +105,16 @@ Debug log: **Settings → Devices & services → SwitchBot Lock Speed → ⋮ �
 
 The session is the same as for other encrypted SwitchBot devices (see [pySwitchbot](https://github.com/sblibs/pySwitchbot)): request an IV (`57 000000 0f2103 <key_id>`), then AES-128-CTR commands on characteristic `cba20002-…`, with replies on `cba20003-…`.
 
+Speed and sound live in one settings register, `0401`:
+
 | Purpose | Plaintext command | Reply |
 |---|---|---|
-| Read speed | `0f4f0401` | `ca 00 <mode> 00 c0` |
-| Set speed | `0f4e0401000000<mode>` | `ca 00` |
+| Read settings | `0f4f0401` | `<flags> 00 <speed> 00 c0` |
+| Write settings | `0f4e0401 00 <mask> <value> <speed>` | `<flags> 00` |
+| Set speed | `0f4e0401 00 00 00 <speed>` | `<flags> 00` |
+| Sound on / off | `0f4e0401 00 40 40 ff` / `0f4e0401 00 40 00 ff` | `ca 00` / `8a 00` |
+
+`<flags>` bit `0x40` is the sound (`0xca` = on, `0x8a` = off). A write changes only the flag bits in `<mask>`, and speed `ff` leaves the speed unchanged. The other flag bits are not decoded yet.
 
 `tools/read_lock_speed.py` reads the mode from a PC with `bleak`. It is read-only and useful for checking a lock outside Home Assistant.
 
@@ -120,7 +135,7 @@ Session framing follows [pySwitchbot](https://github.com/sblibs/pySwitchbot) (MI
 
 ## Polski
 
-Integracja dodaje do zamka **SwitchBot Lock Ultra** encję **Prędkość silnika** (Max Mode / Standard / Low), sterowaną lokalnie przez Bluetooth. Jest nieoficjalna i niezwiązana z firmą SwitchBot. Używasz na własne ryzyko.
+Integracja dodaje do zamka **SwitchBot Lock Ultra** encję **Prędkość silnika** (Max Mode / Standard / Low) i przełącznik **Dźwięk**, sterowane lokalnie przez Bluetooth. Jest nieoficjalna i niezwiązana z firmą SwitchBot. Używasz na własne ryzyko.
 
 **Wymagania:**
 - Bluetooth w Home Assistant, który może połączyć się z zamkiem (adapter lub proxy ESPHome).
@@ -132,7 +147,7 @@ Integracja dodaje do zamka **SwitchBot Lock Ultra** encję **Prędkość silnika
 3. Ustawienia → Urządzenia i usługi → Dodaj integrację → SwitchBot Lock Speed.
 
 **Ważne:**
-- Komenda zmiany prędkości jest wysyłana raz i nigdy nie jest ponawiana. Ponawiane jest tylko łączenie, zanim cokolwiek zostanie wysłane.
+- Komenda zmiany prędkości lub dźwięku jest wysyłana raz i nigdy nie jest ponawiana. Ponawiane jest tylko łączenie, zanim cokolwiek zostanie wysłane.
 - Zamek przyjmuje jedno połączenie naraz. Aplikacja SwitchBot otwarta na telefonie w pobliżu może blokować HA.
-- Tryb jest odczytywany przy starcie i po każdej zmianie. Zmiany z aplikacji odświeżysz akcją `homeassistant.update_entity`.
+- Ustawienia są odczytywane przy starcie i po każdej zmianie. Zmiany z aplikacji odświeżysz akcją `homeassistant.update_entity`.
 - `Standard` jest potwierdzony. `Max` i `Low` wywnioskowano z nagrań aplikacji. Jeśli aplikacja pokazuje inny tryb, zgłoś issue.

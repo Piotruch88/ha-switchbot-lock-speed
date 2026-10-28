@@ -1,4 +1,4 @@
-"""Read the current speed mode from a Lock Ultra with bleak, outside Home Assistant.
+"""Read the current speed mode and sound setting from a Lock Ultra with bleak, outside Home Assistant.
 
 Read-only: this tool cannot change the setting. Requires `pip install bleak cryptography`.
 
@@ -17,6 +17,7 @@ from bleak import BleakClient, BleakScanner
 _PATH = pathlib.Path(__file__).parents[1] / "custom_components" / "switchbot_lock_speed" / "protocol.py"
 _spec = importlib.util.spec_from_file_location("protocol", _PATH)
 protocol = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = protocol  # dataclasses look the module up while decorating
 _spec.loader.exec_module(protocol)
 
 NAMES = {0: "max (Max Mode, assumed)", 1: "standard (Standard, confirmed)", 2: "low (Low, assumed)"}
@@ -33,8 +34,11 @@ async def main(path: str) -> None:
         print("Connected")
         session = protocol.SpeedSession(client, int(cfg["key_id"], 16), bytes.fromhex(cfg["encryption_key"]))
         await session.start()
-        mode, raw = await session.read_mode()
-        print(f"Speed byte {mode:02x} -> {NAMES.get(mode, 'unknown')} | raw {raw} | write_sent={session.write_sent}")
+        s = await session.read_settings()
+        print(
+            f"Speed byte {s.speed:02x} -> {NAMES.get(s.speed, 'unknown')} | sound {'on' if s.sound else 'off'} "
+            f"| raw {s.raw} | write_sent={session.write_sent}"
+        )
     print("Disconnected")
 
 

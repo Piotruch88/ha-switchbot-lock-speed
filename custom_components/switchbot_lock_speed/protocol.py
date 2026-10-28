@@ -1,18 +1,21 @@
-"""SwitchBot Lock Ultra motor speed over BLE, no Home Assistant imports.
+"""SwitchBot Lock Ultra settings register (motor speed, sound) over BLE, no Home Assistant imports.
 
 Session framing follows pySwitchbot device.py (SHA 349f338749a0e925181651ed7471098f3e8176f1):
     IV request:  57 000000 0f2103 <key_id>          -> 01 00 00 00 <IV 16 B>
     command:     57 <key_id> <IV[0:2]> AES-128-CTR(key, IV, plaintext)
     response:    01 <key_id> <IV[0:2]> AES-128-CTR(key, IV, payload)
-Speed read/write commands were captured from the official SwitchBot app (HCI snoop log)
-and confirmed on a real Lock Ultra:
-    read  0f4f0401          -> ca 00 <mode> 00 c0
-    write 0f4e0401000000<m> -> ca 00
+Settings register 0401, captured from the official SwitchBot app (HCI snoop log) and
+confirmed on a real Lock Ultra:
+    read  0f4f0401                         -> <flags> 00 <speed> 00 c0
+    write 0f4e0401 00 <mask> <value> <speed> -> <flags after write> 00
+Flags bit 0x40 is the sound (0xca = on, 0x8a = off). A write only changes the flag bits in
+<mask> (set to <value>), and speed 0xff leaves the speed unchanged.
 """
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -21,9 +24,10 @@ SERVICE_UUID = "cba20d00-224d-11e6-9fb8-0002a5d5c51b"
 TX_UUID = "cba20002-224d-11e6-9fb8-0002a5d5c51b"
 RX_UUID = "cba20003-224d-11e6-9fb8-0002a5d5c51b"
 
-READ_SETTING = bytes.fromhex("0f4f0401")
-WRITE_SETTING_PREFIX = bytes.fromhex("0f4e0401000000")
-WRITE_OK = bytes.fromhex("ca00")
+READ_SETTINGS = bytes.fromhex("0f4f0401")
+WRITE_SETTINGS_PREFIX = bytes.fromhex("0f4e0401")
+SPEED_UNCHANGED = 0xFF
+SOUND_FLAG = 0x40
 VALID_MODES = (0x00, 0x01, 0x02)
 
 
@@ -40,16 +44,29 @@ class GattClient(Protocol):
     async def write_gatt_char(self, char: str, data: bytes, response: bool = ...) -> None: ...
 
 
+@dataclass(frozen=True)
+class LockSettings:
+    """Decoded settings register. `speed` is None when only a write reply is known."""
+
+    flags: int
+    speed: int | None
+    raw: str | None = None
+
+    @property
+    def sound(self) -> bool:
+        return bool(self.flags & SOUND_FLAG)
+
+
 def _ctr(key: bytes, iv: bytes, data: bytes) -> bytes:
     ctx = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
     return ctx.update(data) + ctx.finalize()
 
 
-def parse_setting(payload: bytes) -> int:
-    """Return the speed mode byte from a decrypted 0f4f0401 payload."""
+def parse_settings(payload: bytes) -> LockSettings:
+    """Decode a 0f4f0401 payload."""
     if len(payload) != 5:
         raise LockSpeedError(f"Setting read has {len(payload)} B ({payload.hex() or 'empty'}), expected 5 B")
-    return payload[2]
+    return LockSettings(flags=payload[0], speed=payload[2], raw=payload.hex())
 
 
 class SpeedSession:
@@ -114,19 +131,34 @@ class SpeedSession:
         )
         return _ctr(self._key, iv, reply[4:]) if len(reply) > 4 else b""
 
-    async def read_mode(self) -> tuple[int, str]:
-        payload = await self._encrypted(READ_SETTING)
-        return parse_setting(payload), payload.hex()
+    async def read_settings(self) -> LockSettings:
+        return parse_settings(await self._encrypted(READ_SETTINGS))
 
-    async def write_mode(self, mode: int) -> None:
-        if mode not in VALID_MODES:
-            raise ValueError(f"Unsupported speed mode {mode}")
+    async def read_mode(self) -> tuple[int, str]:
+        settings = await self.read_settings()
+        return settings.speed, settings.raw
+
+    async def _write_settings(self, mask: int, value: int, speed: int) -> int:
+        """Send one settings write; return the flags byte the lock reports afterwards."""
         if self.write_sent:
             raise LockSpeedError("This session already sent its single write")
         self.write_sent = True
         try:
-            reply = await self._encrypted(WRITE_SETTING_PREFIX + bytes([mode]))
+            reply = await self._encrypted(WRITE_SETTINGS_PREFIX + bytes([0x00, mask, value & mask, speed]))
         except LockSpeedError as err:
             raise WriteUncertainError(f"Write sent, result unknown: {err}") from err
-        if reply != WRITE_OK:
-            raise WriteUncertainError(f"Write reply {reply.hex() or 'empty'}, expected ca00")
+        # Byte 0 is the current flags (0xca or 0x8a depending on sound), byte 1 the status.
+        if len(reply) != 2 or reply[1] != 0x00:
+            raise WriteUncertainError(f"Write reply {reply.hex() or 'empty'}, expected <flags>00")
+        return reply[0]
+
+    async def write_mode(self, mode: int) -> int:
+        if mode not in VALID_MODES:
+            raise ValueError(f"Unsupported speed mode {mode}")
+        return await self._write_settings(0x00, 0x00, mode)
+
+    async def write_sound(self, on: bool) -> int:
+        flags = await self._write_settings(SOUND_FLAG, SOUND_FLAG if on else 0x00, SPEED_UNCHANGED)
+        if bool(flags & SOUND_FLAG) != on:
+            raise WriteUncertainError(f"Lock reports flags {flags:02x} after setting sound {'on' if on else 'off'}")
+        return flags

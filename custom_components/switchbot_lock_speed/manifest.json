@@ -1,13 +1,17 @@
 {
   "domain": "switchbot_lock_speed",
   "name": "SwitchBot Lock Speed",
-  "codeowners": ["@Piotruch88"],
+  "codeowners": [
+    "@Piotruch88"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth"],
+  "dependencies": [
+    "bluetooth"
+  ],
   "documentation": "https://github.com/Piotruch88/ha-switchbot-lock-speed",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Piotruch88/ha-switchbot-lock-speed/issues",
   "requirements": [],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

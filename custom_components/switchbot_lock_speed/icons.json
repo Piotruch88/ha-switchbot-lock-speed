@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "select": {
+      "speed": {
+        "default": "mdi:speedometer"
+      }
+    },
+    "switch": {
+      "sound": {
+        "default": "mdi:volume-high",
+        "state": {
+          "off": "mdi:volume-off"
+        }
+      }
+    }
+  }
+}
